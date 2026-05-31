@@ -1,0 +1,13 @@
+# This skill is a pure HTTP client. Nothing here should be committed except
+# source: scripts, docs, and tests.
+
+# Stray backend H2 datasource (captured if the backend ever runs from this dir)
+data/
+*.mv.db
+*.trace.db
+
+# Generated project archives + output dirs from generate/wizard/fullstack scripts
+out/
+*.zip
+
+node_modules/

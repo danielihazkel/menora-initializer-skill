@@ -10,13 +10,25 @@ import {
 let TMP;
 let OPENAPI_SPEC;
 let WSDL_DOC;
+let FULLSTACK_PAYLOAD;
 
 before(async () => {
   await requireBackend();
   TMP = await mkdtemp(join(tmpdir(), 'menora-tests-'));
   OPENAPI_SPEC = await readFile(join(FIXTURES, 'openapi.yaml'), 'utf8');
   WSDL_DOC = await readFile(join(FIXTURES, 'service.wsdl'), 'utf8');
+  FULLSTACK_PAYLOAD = await readFile(join(FIXTURES, 'fullstack.json'), 'utf8');
 });
+
+// Asserts every path in `prefixes` is the start of at least one file path.
+function assertPathPrefixes(preview, prefixes) {
+  assert.ok(Array.isArray(preview?.files), 'no files[] in preview response');
+  const paths = preview.files.map((f) => f.path);
+  for (const pre of prefixes) {
+    assert.ok(paths.some((p) => p.startsWith(pre)),
+      `no file under '${pre}'\nactual: ${paths.slice(0, 40).join(', ')}`);
+  }
+}
 
 const COMMON = [
   '--type', 'maven-project',
@@ -322,5 +334,80 @@ describe('error paths', () => {
     assert.equal(body.error, 'Invalid request');
     assert.match(body.detail, /Unknown SOAP wizard mode.*CLIENTS/);
     assert.match(body.detail, /Valid values: ENDPOINTS, CLIENT, BOTH/);
+  });
+});
+
+describe('frontend & fullstack metadata', () => {
+  test('--section frontend returns version dropdowns + dependency catalog', async () => {
+    const data = await runJson('metadata', ['--section', 'frontend']);
+    assert.ok(Array.isArray(data.reactVersions) && data.reactVersions.length > 0, 'no reactVersions');
+    assert.ok(Array.isArray(data.dependencies), 'no dependencies[] in frontend metadata');
+    assert.ok('colorPalettes' in data, 'no colorPalettes in frontend metadata');
+  });
+
+  test('--section entity-template-sets returns the fullstack template sets', async () => {
+    const data = await runJson('metadata', ['--section', 'entity-template-sets']);
+    assert.ok(Array.isArray(data) && data.length > 0, 'no entity template sets');
+    for (const set of data) assert.ok(set.setKey, `set missing setKey: ${JSON.stringify(set)}`);
+  });
+
+  test('--section compatibility --projectKind FRONTEND returns only FE rows', async () => {
+    const data = await runJson('metadata', ['--section', 'compatibility', '--projectKind', 'FRONTEND']);
+    assert.ok(Array.isArray(data), 'compatibility not an array');
+    for (const r of data) {
+      assert.equal(r.projectKind, 'FRONTEND', `non-FRONTEND row leaked: ${JSON.stringify(r)}`);
+      assert.ok(['REQUIRES', 'CONFLICTS', 'RECOMMENDS'].includes(r.relationType),
+        `unexpected relationType: ${r.relationType}`);
+    }
+  });
+});
+
+describe('frontend generation', () => {
+  test('preview returns a React project with package.json', async () => {
+    const j = await runJson('frontend-preview', ['--projectName', 'demo']);
+    assert.ok(Array.isArray(j.files) && j.files.length > 0, 'no files in frontend preview');
+    const paths = j.files.map((f) => f.path);
+    assert.ok(paths.some((p) => p.endsWith('package.json')),
+      `no package.json\nactual: ${paths.slice(0, 40).join(', ')}`);
+  });
+
+  test('generate writes a valid zip', async () => {
+    const out = join(TMP, 'frontend.zip');
+    const r = await runJson('frontend-generate', ['--projectName', 'demo', '--out', out]);
+    assert.equal(r.savedTo.replace(/\\/g, '/'), out.replace(/\\/g, '/'));
+    await assertZipFile(out, 1000);
+  });
+});
+
+describe('fullstack', () => {
+  test('import-ddl turns CREATE TABLE into an entities[] array', async () => {
+    const ddl = await readFile(join(FIXTURES, 'schema.sql'), 'utf8');
+    const entities = await runJson('import-ddl', ['--dialect', 'H2'], ddl);
+    assert.ok(Array.isArray(entities) && entities.length === 1, `expected 1 entity, got ${JSON.stringify(entities)}`);
+    const e = entities[0];
+    assert.ok(e.name, 'entity missing name');
+    assert.ok(Array.isArray(e.fields) && e.fields.length > 0, 'entity has no fields');
+    assert.ok(e.fields.some((f) => f.primaryKey), 'no primary-key field detected from DDL');
+  });
+
+  test('preview spans backend/ and frontend/ plus root README.md', async () => {
+    const j = await runJson('fullstack-preview', [], FULLSTACK_PAYLOAD);
+    assertPathPrefixes(j, ['backend/', 'frontend/']);
+    assertFiles(j, { contains: ['README.md'] });
+  });
+
+  test('generate writes a valid zip', async () => {
+    const out = join(TMP, 'fullstack.zip');
+    const r = await runJson('fullstack-generate', ['--out', out], FULLSTACK_PAYLOAD);
+    assert.equal(r.savedTo.replace(/\\/g, '/'), out.replace(/\\/g, '/'));
+    await assertZipFile(out);
+  });
+
+  test('missing entities → structured 400', async () => {
+    const body = await runJsonError('fullstack-preview', [], JSON.stringify({
+      ...wizardBase(), dependencies: ['web', 'data-jpa', 'h2'],
+    }));
+    assert.equal(body.error, 'Invalid request');
+    assert.match(body.detail, /entity/i);
   });
 });

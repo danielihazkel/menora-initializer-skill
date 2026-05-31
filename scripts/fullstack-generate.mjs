@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// POST /starter-wizard.zip — JSON-body sibling of /starter.zip that also
-// accepts SQL DDL, OpenAPI specs, and WSDLs to drive the wizards.
+// POST /starter-fullstack.zip — generates a fullstack scaffold (Spring Boot
+// backend + React frontend) and saves the ZIP to disk. The archive contains
+// backend/, frontend/, and a root README.md.
 //
 // Usage:
-//   node wizard-generate.mjs --file payload.json --out ./out/app.zip
-//   cat payload.json | node wizard-generate.mjs
+//   node fullstack-generate.mjs --file payload.json --out ./out/app.zip
+//   cat payload.json | node fullstack-generate.mjs
 //
-// Body: same as wizard-preview.mjs (WizardStarterRequest).
+// Body: same as fullstack-preview.mjs (FullstackStarterRequest).
 //
 // Output: { savedTo, sizeBytes }
 
@@ -19,7 +20,7 @@ const out = flags.out && flags.out !== true
   ? String(flags.out)
   : `./${body.artifactId || 'demo'}.zip`;
 
-const res = await fetch(fullUrl('/starter-wizard.zip'), {
+const res = await fetch(fullUrl('/starter-fullstack.zip'), {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),

@@ -1,6 +1,12 @@
 // Shared helpers for the menora-initializr skill scripts.
 // Node >= 18 (built-in fetch). No npm dependencies.
 
+import { createWriteStream } from 'node:fs';
+import { mkdir, readFile, stat } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
 export const BASE_URL = process.env.MENORA_INITIALIZR_URL || 'http://localhost:8080';
 
 export function parseArgs(argv) {
@@ -67,16 +73,24 @@ export async function readStdin() {
   return data;
 }
 
-// Builds a URL for /starter.zip or /starter.preview from CLI flags.
+// Passthrough flags whose name maps 1:1 to a query param on the backend
+// generation endpoints.
+const BACKEND_PASSTHROUGH = [
+  'type', 'language', 'bootVersion', 'groupId', 'artifactId',
+  'name', 'description', 'packageName', 'packaging', 'javaVersion',
+];
+const FRONTEND_PASSTHROUGH = [
+  'projectName', 'description', 'scope', 'appTitle',
+  'reactVersion', 'nodeVersion', 'packageManager', 'basePath',
+  'colorPalette', 'apiBaseUrl', 'backendArtifactId',
+];
+
+// Builds a generation URL from CLI flags for the given passthrough param set.
 // Translates --deps "web,jpa" → dependencies=web,jpa
 // Translates --opts "kafka=consumer-example,producer-example;jpa=hibernate"
 //   → opts-kafka=...&opts-jpa=...
-export function buildStarterUrl(pathname, flags) {
+function buildGenUrl(pathname, flags, passthrough) {
   const url = new URL(pathname, BASE_URL);
-  const passthrough = [
-    'type', 'language', 'bootVersion', 'groupId', 'artifactId',
-    'name', 'description', 'packageName', 'packaging', 'javaVersion',
-  ];
   for (const k of passthrough) {
     if (flags[k] !== undefined && flags[k] !== true) {
       url.searchParams.set(k, String(flags[k]));
@@ -93,4 +107,43 @@ export function buildStarterUrl(pathname, flags) {
     }
   }
   return url;
+}
+
+// Backend single-module generation (/starter.zip, /starter.preview).
+export function buildStarterUrl(pathname, flags) {
+  return buildGenUrl(pathname, flags, BACKEND_PASSTHROUGH);
+}
+
+// Frontend React generation (/frontend/starter.zip, /frontend/starter.preview).
+export function buildFrontendUrl(pathname, flags) {
+  return buildGenUrl(pathname, flags, FRONTEND_PASSTHROUGH);
+}
+
+// Resolves a JSON request body from --file <path> or piped stdin, then parses it.
+// Exits with a clear message on empty input or invalid JSON.
+export async function resolveBody(flags) {
+  const raw = flags.file && flags.file !== true
+    ? await readFile(String(flags.file), 'utf8')
+    : await readStdin();
+  if (!raw.trim()) {
+    await fail('No JSON body provided. Pass --file <path> or pipe JSON to stdin.');
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    await fail('Invalid JSON: ' + e.message);
+  }
+}
+
+// Streams a fetch Response body to disk and reports size. Surfaces a non-OK
+// response as a failure with the server's body text. Returns { savedTo, sizeBytes }.
+export async function saveZip(res, outPath) {
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    await fail(`HTTP ${res.status} ${res.statusText} ${res.url}\n${body}`);
+  }
+  await mkdir(dirname(outPath), { recursive: true });
+  await pipeline(Readable.fromWeb(res.body), createWriteStream(outPath));
+  const s = await stat(outPath);
+  return { savedTo: outPath, sizeBytes: s.size };
 }

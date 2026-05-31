@@ -22,24 +22,10 @@
 //
 // Output: { files: [{path, content}], tree: [...] }
 
-import { readFile } from 'node:fs/promises';
-import { parseArgs, postJson, readStdin, fail } from './_lib.mjs';
+import { parseArgs, postJson, resolveBody } from './_lib.mjs';
 
 const { flags } = parseArgs(process.argv.slice(2));
-const raw = flags.file && flags.file !== true
-  ? await readFile(String(flags.file), 'utf8')
-  : await readStdin();
-
-if (!raw.trim()) {
-  await fail('No JSON body provided. Pass --file <path> or pipe JSON to stdin.');
-}
-
-let body;
-try {
-  body = JSON.parse(raw);
-} catch (e) {
-  await fail('Invalid JSON: ' + e.message);
-}
+const body = await resolveBody(flags);
 
 const data = await postJson('/starter-wizard.preview', body);
 process.stdout.write(JSON.stringify(data, null, 2) + '\n');

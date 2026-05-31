@@ -5,7 +5,7 @@ description: Use when the user asks to generate, preview, or scaffold a Spring B
 
 # Menora Initializr — REST client
 
-The internal Spring Boot project generator at `backend/`. This skill drives the same REST surface the React UI uses — discovery (`/metadata/*`), single-module generation (`/starter.zip`, `/starter.preview`), and wizards that turn SQL DDL → JPA, OpenAPI specs → controllers/clients, and WSDL → SOAP code.
+The internal project generator at `backend/`. This skill drives the same REST surface the React UI uses — discovery (`/metadata/*`, `/frontend/metadata`), single-module backend generation (`/starter.zip`, `/starter.preview`), React frontend generation (`/frontend/starter.*`), fullstack generation from entity definitions (`/starter-fullstack.*`), and wizards that turn SQL DDL → JPA, OpenAPI specs → controllers/clients, and WSDL → SOAP code.
 
 ## Setup
 
@@ -28,12 +28,18 @@ All scripts live next to this file under `scripts/`. Invoke with absolute or rep
 ### Discovery — `metadata.mjs`
 ```
 node scripts/metadata.mjs --section <name>
+node scripts/metadata.mjs --section compatibility --projectKind FRONTEND
+node scripts/metadata.mjs --section frontend --reactVersion 18
 ```
-`--section`: `client | extensions | compatibility | starter-templates | sql-dialects | openapi-capable-deps | soap-capable-deps | all` (default `all`).
+`--section`: `client | extensions | compatibility | starter-templates | sql-dialects | openapi-capable-deps | soap-capable-deps | frontend | entity-template-sets | all` (default `all`).
 
 - `client` — the standard Initializr metadata: deps, boot/java versions, packaging, types.
 - `extensions` — sub-options per dependency.
 - `sql-dialects` / `openapi-capable-deps` / `soap-capable-deps` — which deps each wizard can target.
+- `frontend` — the React generator catalog: react/node versions, package managers, FE deps, color palettes (accepts `--reactVersion`). Catalog shape is `dependencies[].entries[]`, not the `dependencies.values[].values[]` of `client`.
+- `entity-template-sets` — backend + frontend template sets the **fullstack** generator targets.
+- `--projectKind BACKEND|FRONTEND` filters `compatibility` and `starter-templates`.
+- `all` covers only the seven backend discovery sections — `frontend` and `entity-template-sets` are fetched only when named.
 
 ### Plain generation — `preview.mjs` / `generate.mjs`
 ```
@@ -51,6 +57,46 @@ Other flags: `--bootVersion`, `--javaVersion`, `--groupId`, `--artifactId`, `--n
 
 `preview.mjs` returns `{ files: [{path, content}], tree: [...] }`.
 `generate.mjs` saves a ZIP and prints `{ savedTo, sizeBytes }`.
+
+### Frontend generation — `frontend-preview.mjs` / `frontend-generate.mjs`
+```
+node scripts/frontend-preview.mjs  --projectName demo --deps router,state-zustand \
+                                   --reactVersion 18 --colorPalette ocean
+node scripts/frontend-generate.mjs --projectName demo --deps router,state-zustand \
+                                   --out ./out/demo.zip
+```
+React / TS / Vite / FSD projects. All flags are optional (the backend fills defaults). Flags: `--projectName` (default `demo`), `--description`, `--scope`, `--appTitle`, `--reactVersion`, `--nodeVersion`, `--packageManager`, `--basePath` (default `/`), `--deps a,b,c`, `--colorPalette`, `--apiBaseUrl`, `--backendArtifactId`, `--opts dep=opt1,opt2;dep2=opt3`. `frontend-generate.mjs` adds `--out` (default `./<projectName>.zip`). Discover valid deps / versions / palettes with `metadata.mjs --section frontend`.
+
+### Fullstack generation — `fullstack-preview.mjs` / `fullstack-generate.mjs`
+```
+node scripts/fullstack-preview.mjs  --file payload.json
+node scripts/fullstack-generate.mjs --file payload.json --out ./out/app.zip
+# or pipe JSON to stdin
+```
+Spring Boot backend **+** React frontend generated from a list of entities, in one ZIP (`backend/`, `frontend/`, root `README.md`). Body is `FullstackStarterRequest` — project metadata (same fields as the wizard) plus `backendTemplateSet` (default `spring-jpa-crud`), `frontendTemplateSet` (default `react-tailwind-crud`), and `entities[]`:
+```json
+{
+  "groupId": "com.demo", "artifactId": "app", "packageName": "com.demo.app",
+  "type": "maven-project", "language": "java", "packaging": "jar",
+  "bootVersion": "3.2.1", "javaVersion": "21",
+  "dependencies": ["web", "data-jpa", "h2"],
+  "entities": [{
+    "name": "Product", "tableName": "products",
+    "fields": [
+      { "name": "id", "type": "LONG", "primaryKey": true, "generated": true },
+      { "name": "name", "type": "STRING", "required": true, "length": 255 }
+    ]
+  }]
+}
+```
+Each entity needs ≥1 field and **exactly one** `primaryKey`. Field `type` accepts canonical (`"STRING"`, `"LOCAL_DATE"`) or Java-style (`"String"`, `"LocalDate"`) names. Omit `dependencies` entirely to inherit the backend set's default deps. Discover template sets with `metadata.mjs --section entity-template-sets`.
+
+### DDL → entities — `import-ddl.mjs`
+```
+node scripts/import-ddl.mjs --file schema.sql --dialect POSTGRESQL
+cat schema.sql | node scripts/import-ddl.mjs
+```
+Turns pasted `CREATE TABLE` DDL into the `entities[]` array a fullstack payload expects — paste the output straight into `"entities"`. `--dialect` is one of `H2` (default), `POSTGRESQL`, `MYSQL`, `DB2`. Prints just the array.
 
 ### Wizards — `wizard-preview.mjs` / `wizard-generate.mjs`
 ```
@@ -139,13 +185,46 @@ node scripts/generate.mjs --type maven-project --language java --packaging jar \
 ### "Generate SOAP endpoints from this WSDL"
 Same flow as OpenAPI but use `--type services` for detect and `wsdlByDep` / `soapOptions` in the payload.
 
+### "Scaffold a React frontend"
+1. See what's available:
+   ```
+   node scripts/metadata.mjs --section frontend
+   ```
+2. Preview, then generate:
+   ```
+   node scripts/frontend-preview.mjs  --projectName demo --deps router,state-zustand
+   node scripts/frontend-generate.mjs --projectName demo --deps router,state-zustand --out ./out/demo.zip
+   ```
+
+### "Generate a fullstack CRUD app from entities"
+1. List the template sets you can target:
+   ```
+   node scripts/metadata.mjs --section entity-template-sets
+   ```
+2. Write a `FullstackStarterRequest` (template above) with `entities[]` to `payload.json`.
+3. Preview, then generate:
+   ```
+   node scripts/fullstack-preview.mjs  --file payload.json
+   node scripts/fullstack-generate.mjs --file payload.json --out ./out/app.zip
+   ```
+
+### "Turn this DDL into a fullstack app"
+1. Convert the schema to entities:
+   ```
+   node scripts/import-ddl.mjs --file schema.sql --dialect POSTGRESQL > entities.json
+   ```
+2. Drop that array into a payload's `entities` field, then run the fullstack flow above.
+
 ## Errors
 
 - `400 Invalid OpenAPI spec` — body has `messages` array; show those to the user.
 - `400 Invalid SQL` — body has `dep`, `statementIndex`, `snippet`, `detail`. Pinpoints the offending dep + line.
 - `400 Invalid WSDL` — body has `messages`.
+- `400 Invalid request` (fullstack) — body has `detail`, e.g. "At least one entity is required", unknown field type, or multiple primary keys. Show `detail` to the user.
 - Connection refused / network error → backend not reachable at `$MENORA_INITIALIZR_URL`. Ask the user for the correct URL or to start the backend. Do not try to start it yourself.
 
 ## References
 
 Full endpoint reference (paths, request shapes, response shapes, source `file:line`) is in `references/endpoints.md` next to this file.
+
+A black-box smoke suite for these scripts lives in `tests/` (run `node --test tests/run.test.mjs` with the backend up). See `tests/README.md` for coverage.

@@ -45,16 +45,19 @@ Sub-options per dependency. Source: `ExtensionMetadataController.java:52`.
 ```
 
 ### `GET /metadata/compatibility`
-Compatibility rules between dependencies. Source: `ExtensionMetadataController.java:63`.
+Compatibility rules between dependencies. Source: `ExtensionMetadataController.java:89`.
+Optional query param `?projectKind=BACKEND|FRONTEND` filters rows; omit it to get every row.
 ```json
 [
-  { "sourceDepId": "jpa", "targetDepId": "h2", "relationType": "REQUIRES", "description": "..." }
+  { "sourceDepId": "data-jpa", "targetDepId": "h2", "relationType": "REQUIRES",
+    "description": "...", "projectKind": "BACKEND" }
 ]
 ```
-`relationType` values include `REQUIRES`, `CONFLICTS_WITH`, `RECOMMENDS`.
+`relationType` values are exactly `REQUIRES`, `CONFLICTS`, `RECOMMENDS` (enum `DependencyCompatibilityEntity.RelationType`). Each row also carries its own `projectKind`.
 
 ### `GET /metadata/starter-templates`
-Preset bundles (one-click recipes). Source: `ExtensionMetadataController.java:74`.
+Preset bundles (one-click recipes). Source: `ExtensionMetadataController.java:103`.
+Optional query param `?projectKind=BACKEND|FRONTEND` filters by kind.
 ```json
 [
   { "id": "rest-api", "name": "REST API", "description": "...", "icon": "...", "color": "...",
@@ -76,7 +79,34 @@ Source: `ExtensionMetadataController.java:116`.
 
 ### `GET /metadata/soap-capable-deps`
 List of dep ids that can drive the SOAP wizard (typically `web-services`).
-Source: `ExtensionMetadataController.java:130`.
+Source: `ExtensionMetadataController.java:163`.
+
+### `GET /metadata/entity-template-sets`
+The backend + frontend template sets the **fullstack** generator can target.
+Source: `ExtensionMetadataController.java:195`.
+```json
+[
+  { "setKey": "spring-jpa-crud", "name": "...", "description": "...", "kind": "BACKEND",
+    "defaultDeps": ["web", "data-jpa", "h2"], "designSystem": null,
+    "bootVersion": "3.2.1", "javaVersion": "21", "defaultPaletteId": null },
+  { "setKey": "react-tailwind-crud", "name": "...", "kind": "FRONTEND_REACT", "defaultDeps": [] }
+]
+```
+
+### `GET /frontend/metadata`
+Discovery for the React frontend generator. Optional `?reactVersion=<id>` scopes the
+dependency catalog (design systems that pin React 18 drop out for React 19). Source:
+`FrontendStarterController.java:222`.
+```json
+{
+  "defaults": { "projectName": "...", "reactVersion": "...", "nodeVersion": "...", "packageManager": "..." },
+  "reactVersions": [...], "nodeVersions": [...], "packageManagers": [...], "pinned": {...},
+  "dependencies": [ { "name": "Routing", "entries": [ { "id": "router", "name": "...", "subOptions": [...] } ] } ],
+  "colorPalettes": [ { "id": "ocean", "name": "...", "primary": "#...", "isDefault": true } ]
+}
+```
+Note: the FE catalog shape is `dependencies[].entries[]` (group → entries), **not** the
+`dependencies.values[].values[]` shape of `/metadata/client`.
 
 ---
 
@@ -101,13 +131,40 @@ Spring Initializr standard. Returns a ZIP. Query params:
 | `opts-{depId}` | `opts-kafka=consumer-example,producer-example` | repeat per dep with sub-options |
 
 ### `GET /starter.preview`
-Same params as `/starter.zip`; returns JSON. Source: `ProjectPreviewController.java:43`.
+Same params as `/starter.zip`; returns JSON. Source: `ProjectPreviewController.java:41`.
 ```json
 {
   "files": [{ "path": "pom.xml", "content": "..." }],
   "tree":  [{ "name": "src", "path": "src", "type": "directory", "children": [...] }]
 }
 ```
+
+---
+
+## Frontend generation (GET)
+
+React / TS / Vite / FSD projects. Source: `FrontendStarterController.java:72,110`. Discover
+valid deps, versions, and palettes via `GET /frontend/metadata` (above).
+
+### `GET /frontend/starter.zip` / `GET /frontend/starter.preview`
+`.zip` returns the archive; `.preview` returns the same `{ files, tree }` shape as
+`/starter.preview`. Query params (all optional — the backend supplies defaults):
+
+| param | example | notes |
+|---|---|---|
+| `projectName` | `demo` | default `demo`; also the zip filename |
+| `description` | `Demo` | |
+| `scope` | `@acme` | npm scope |
+| `appTitle` | `Demo App` | |
+| `reactVersion` | `18` | from `/frontend/metadata` |
+| `nodeVersion` | `20` | |
+| `packageManager` | `npm` | `npm` / `pnpm` / `yarn` |
+| `basePath` | `/` | default `/` |
+| `dependencies` | `router,state-zustand` | csv |
+| `colorPalette` | `ocean` | id from `/frontend/metadata` |
+| `apiBaseUrl` | `http://localhost:8080` | |
+| `backendArtifactId` | `app` | |
+| `opts-{depId}` | `opts-design-mui=icons` | repeat per dep with sub-options |
 
 ---
 
@@ -164,6 +221,53 @@ Source: `WizardStarterController.java:145`.
 - Invalid OpenAPI: `{ "error": "Invalid OpenAPI spec", "messages": [...] }`
 - Invalid WSDL:    `{ "error": "Invalid WSDL",          "messages": [...] }`
 - Invalid SQL:     `{ "error": "Invalid SQL", "dep": "h2", "statementIndex": 0, "snippet": "...", "detail": "..." }`
+
+---
+
+## Fullstack generation (POST `application/json`)
+
+Generates a Spring Boot backend **and** a React frontend for a list of user-defined
+entities, in one ZIP (`backend/`, `frontend/`, root `README.md`). Source:
+`FullstackStarterController.java:92,132`.
+
+Body `FullstackStarterRequest`:
+```ts
+{
+  groupId?, artifactId?, name?, description?, packageName?,
+  type?, language?, bootVersion?, packaging?, javaVersion?, version?,
+  configurationFileFormat?,
+  dependencies?: string[],                 // omit entirely → backend set's default deps are used
+  opts?: { [depId: string]: string[] },
+  backendTemplateSet?:  string,            // default "spring-jpa-crud"
+  frontendTemplateSet?: string,            // default "react-tailwind-crud"
+  entities: [{                             // ≥1 required; each needs exactly one primaryKey field
+    name: string, tableName?: string,
+    fields: [{
+      name: string,
+      type: string,                        // "STRING"/"String", "LONG", "LOCAL_DATE"/"LocalDate", "ENUM", ...
+      primaryKey?: boolean, generated?: boolean, required?: boolean, unique?: boolean,
+      length?: number,                     // STRING only
+      enumValues?: string[]                // ENUM only (and required for ENUM)
+    }]
+  }]
+}
+```
+Discover template sets via `GET /metadata/entity-template-sets`.
+
+### `POST /starter-fullstack.preview`
+Returns `{ files, tree }` — file paths span `backend/` and `frontend/`.
+
+### `POST /starter-fullstack.zip`
+Returns `application/octet-stream`.
+
+### `POST /metadata/fullstack/import-ddl`
+Parses pasted `CREATE TABLE` DDL into the exact `entities[]` wire shape above, so you can
+pre-fill a fullstack payload from an existing schema. Source: `ExtensionMetadataController.java:228`.
+Body `{ "sql": "<DDL>", "dialect"?: "H2"|"POSTGRESQL"|"MYSQL"|"DB2" }` (dialect defaults to `H2`).
+Returns `{ "entities": [...] }`. Bad SQL → the same `Invalid SQL` 400 shape as the SQL wizard.
+
+### Error responses (HTTP 400)
+- Validation: `{ "error": "Invalid request", "detail": "..." }` (e.g. "At least one entity is required", unknown field type, multiple primary keys).
 
 ---
 

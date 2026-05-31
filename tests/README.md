@@ -30,7 +30,9 @@ tests/
 ├── helpers.mjs        runScript / runJson / runJsonError / assertFiles
 └── fixtures/
     ├── openapi.yaml   2 paths, used by detect + OpenAPI wizard tests
-    └── service.wsdl   1 service / 1 op, used by detect + SOAP wizard tests
+    ├── service.wsdl   1 service / 1 op, used by detect + SOAP wizard tests
+    ├── schema.sql     1 CREATE TABLE, used by the import-ddl test
+    └── fullstack.json 1-entity payload, used by the fullstack preview/generate tests
 ```
 
 Wizard payloads are stitched in-memory from `wizardBase()` + the fixtures.
@@ -39,7 +41,7 @@ Wizard payloads are stitched in-memory from `wizardBase()` + the fixtures.
 
 | group | what it asserts |
 |---|---|
-| metadata | all 7 sections + `--section all`; `dependencies.values[].values[]` shape |
+| metadata | all 7 backend sections + `--section all`; `dependencies.values[].values[]` shape |
 | plain generation — preview | web+data-jpa returns ≥15 files incl. `pom.xml`; h2 in `application.yaml`; missing `--type` surfaces 500 |
 | plain generation — generate | zip written, magic bytes `PK\x03\x04` |
 | sub-options round-trip | `kafka=consumer-example,producer-example` produces both example classes |
@@ -48,6 +50,9 @@ Wizard payloads are stitched in-memory from `wizardBase()` + the fixtures.
 | SOAP wizard | same matrix |
 | detect | `--type paths` and `--type services` return expected arrays |
 | error paths | bad SQL / bad OpenAPI / bad WSDL → structured 400; OpenAPI / SOAP mode typo `"CLIENTS"` → 400 with "Valid values: …" |
+| frontend & fullstack metadata | `--section frontend` (version dropdowns + catalog), `--section entity-template-sets`; `--section compatibility --projectKind FRONTEND` returns only FE rows with `relationType ∈ {REQUIRES,CONFLICTS,RECOMMENDS}` |
+| frontend generation | preview returns a React project with `package.json`; generate writes a valid zip |
+| fullstack | `import-ddl` turns `schema.sql` into a 1-entity array with a PK field; preview spans `backend/` + `frontend/` + root `README.md`; generate writes a valid zip; missing `entities` → 400 |
 
 ## When a test fails
 
