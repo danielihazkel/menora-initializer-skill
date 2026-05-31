@@ -105,8 +105,10 @@ describe('plain generation — preview', () => {
 
   test('missing --type surfaces server error to caller', async () => {
     const noType = COMMON.filter((_, i, a) => a[i - 1] !== '--type' && a[i] !== '--type');
+    // The global exception handler returns { error: "Internal error", detail } on a 500.
     const body = await runJsonError('preview', [...noType, '--deps', 'web']);
-    assert.equal(body.status, 500);
+    assert.equal(body.error, 'Internal error', `unexpected error body: ${JSON.stringify(body)}`);
+    assert.ok(typeof body.detail === 'string' && body.detail.length > 0, 'no detail on 500');
   });
 });
 

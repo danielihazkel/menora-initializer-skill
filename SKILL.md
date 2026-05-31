@@ -227,4 +227,4 @@ Same flow as OpenAPI but use `--type services` for detect and `wsdlByDep` / `soa
 
 Full endpoint reference (paths, request shapes, response shapes, source `file:line`) is in `references/endpoints.md` next to this file.
 
-A black-box smoke suite for these scripts lives in `tests/` (run `node --test tests/run.test.mjs` with the backend up). See `tests/README.md` for coverage.
+A black-box test suite for these scripts lives in `tests/` (run `node --test tests/*.test.mjs` with the backend up). It pairs a happy-path smoke file with themed deep files (validation matrices, compatibility resolution, artifact structure). See `tests/README.md` for coverage.

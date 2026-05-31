@@ -1,0 +1,36 @@
+{
+  "groupId": "com.demo",
+  "artifactId": "app",
+  "packageName": "com.demo.app",
+  "type": "maven-project",
+  "language": "java",
+  "packaging": "jar",
+  "bootVersion": "3.2.1",
+  "javaVersion": "21",
+  "dependencies": ["web", "data-jpa", "h2"],
+  "backendTemplateSet": "spring-jpa-crud",
+  "frontendTemplateSet": "react-tailwind-crud",
+  "entities": [
+    {
+      "name": "Product",
+      "tableName": "products",
+      "fields": [
+        { "name": "id", "type": "LONG", "primaryKey": true, "generated": true },
+        { "name": "name", "type": "STRING", "required": true, "unique": true, "length": 120 },
+        { "name": "price", "type": "BIG_DECIMAL", "required": true },
+        { "name": "releaseDate", "type": "LOCAL_DATE" },
+        { "name": "active", "type": "BOOLEAN" },
+        { "name": "status", "type": "ENUM", "enumValues": ["DRAFT", "PUBLISHED", "ARCHIVED"] }
+      ]
+    },
+    {
+      "name": "Customer",
+      "tableName": "customers",
+      "fields": [
+        { "name": "id", "type": "LONG", "primaryKey": true, "generated": true },
+        { "name": "email", "type": "STRING", "required": true, "unique": true, "length": 255 },
+        { "name": "createdAt", "type": "LOCAL_DATE_TIME" }
+      ]
+    }
+  ]
+}
