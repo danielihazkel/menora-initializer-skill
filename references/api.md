@@ -66,9 +66,9 @@ Zip root: `<artifactId>/`. **A wizard request is one module** — `modules` is n
 | Wizard | Document map | Options map → per-dependency object |
 |---|---|---|
 | SQL → JPA | `sqlByDep: {"postgresql": "CREATE TABLE …"}` (key: a database dependency) | `sqlOptions`: `subPackage` ("entity"), `tables: [{name, generateRepository}]` (unlisted = all, with repositories), `apiMode`: `NONE` \| `ENTITY_DIRECT` \| `INLINE_DTO` \| `MAPSTRUCT_DTO` (REST controllers over the entities), `flywayBaseline` (default true: the script becomes `V1__init.sql` when `flyway` is selected), `generateTests` (needs an apiMode) |
-| OpenAPI | `specByDep: {"web": "openapi: 3.0.0 …"}` | `openApiOptions`: `mode` `CONTROLLERS` \| `CLIENT` \| `BOTH`, `apiStyle` `interfaces` (an `XxxApi` interface regenerated freely + an `XxxController implements` the team owns — **use this for anything that will be updated**) \| `classes`, `clientKind` `restTemplate` \| `restClient`, `copySpec` (keep the spec in `src/main/resources/openapi/`), `apiSubPackage` ("api"), `dtoSubPackage` ("dto"), `clientSubPackage` ("client"), `baseUrlProperty` |
+| OpenAPI | `specByDep: {"web": "openapi: 3.0.0 …"}` | `openApiOptions`: `mode` `CONTROLLERS` \| `CLIENT` \| `BOTH`, `apiStyle` `interfaces` (an `XxxApi` interface regenerated freely + an `XxxController implements` the team owns — **use this for anything that will be updated**) \| `classes`, `clientKind` `restTemplate` \| `restClient`, `copySpec` (keep the spec in `src/main/resources/openapi/`), `apiSubPackage` ("api"), `dtoSubPackage` ("dto"), `clientSubPackage` ("client"), `baseUrlProperty`. A generated client reads its credentials from `<base>.security.<scheme>.api-key \| token \| username \| password`; an OAuth2 client-credentials scheme also takes `client-id`, `client-secret` (then the client fetches and renews its own token), `scopes`, `token-url`, `client-authentication` (`basic` \| `post`) |
 | SOAP | `wsdlByDep: {"web-services": "<definitions …>"}` (self-contained; imports are refused) | `soapOptions`: `mode` `ENDPOINTS` \| `CLIENT` \| `BOTH`, `contextPath` ("/ws"), `endpointSubPackage`, `clientSubPackage`, `payloadSubPackage`, `baseUrlProperty` |
-| Events (AsyncAPI 2.x/3.x → Kafka) | `asyncApiByDep: {"kafka": "asyncapi: 3.0.0 …"}` | `eventOptions`: `channels: [{name, produce, consume}]` (absent = as the document's application does), `groupId`, `subPackage` ("events"), `payloadSubPackage` ("events.model"), `generateTests`. Avro channels (`schemaFormat: application/vnd.apache.avro…`) become `.avsc` + avro-maven-plugin |
+| Events (AsyncAPI 2.x/3.x → Kafka) | `asyncApiByDep: {"kafka": "asyncapi: 3.0.0 …"}` | `eventOptions`: `channels: [{name, produce, consume}]` (absent = as the document's application does), `groupId`, `subPackage` ("events"), `payloadSubPackage` ("events.model"), `generateTests`, `schemaRegistry` (`confluent`: Avro through Confluent's schema registry; absent: the single-object encoding). Avro channels (`schemaFormat: application/vnd.apache.avro…`) become `.avsc` + avro-maven-plugin. A message's headers (traits merged), `correlationId` header and `bindings.kafka.key` (a UUID) are read: a `<Message>Headers` record, `send(key, payload, headers)`, `handle(key, payload, headers)` |
 
 The server adds what a wizard needs (`data-jpa` for SQL, `web` for an API, `openapi`, `mapstruct`,
 `kafka`, `web-services`). External `$ref`s / imports in a pasted document are refused.
@@ -80,16 +80,29 @@ Detect what a document holds before choosing options:
 
 ## Updating a project
 
-`POST /starter.patch` `{base, target, baseCatalogHash?}` — backend, wizard and multi-module projects.
-Each side is a whole `menora-model.json` or its `request`; a side with `modules` is multi-module.
-`POST /starter-fullstack.patch` `{base, target, baseTemplatesHash?}` — fullstack; each side a
-request. A refusal names the side: `{error, side: "base"|"target", detail, path?}`.
+`POST /starter.patch` `{base, target, baseCatalogHash?, baseSnapshot?}` — backend, wizard and
+multi-module projects. Each side is a whole `menora-model.json` or its `request`; a side with
+`modules` is multi-module; a whole model file's `generator.snapshot` is read as `baseSnapshot`.
+`POST /starter-fullstack.patch` `{base, target, baseTemplatesHash?, baseSnapshot?, baseSchemaVersion?}`
+— fullstack; each side a request. `baseSchemaVersion` is the model file's `generator.schemaVersion`
+(the version of the generator's own `app_*` tables; the zip's `X-Schema-Version`): the migration
+brings an older one up, and without it those tables' statements are written "To review". A refusal
+names the side: `{error, side: "base"|"target", detail, path?}`.
+
+**Snapshots.** Every generated zip carries `X-Snapshot` and its `menora-model.json` the same id as
+`generator.snapshot` (SHA-256 of every other file). The server keeps the files of each download
+(`menora.snapshots.retention-days`, 730 from last use). An update whose `baseSnapshot` it still has
+starts from those files — `X-Update-Base: snapshot`, and the patch carries the generator's fixes
+since as well as the model's change; otherwise `X-Update-Base: regenerated` (both sides generated
+now). An update's own `X-Snapshot` (and the `generator.snapshot` of its `files/menora-model.json`)
+names the project once the update is applied.
 
 Answer: `<artifactId>-update.zip` with headers `X-Update-Added/Changed/Deleted`, holding
 `<artifactId>-update/UPDATE.md`, `update.patch` (git format, for `git apply --3way` from the
 project root), `DELETED.txt` (when files go), `files/<path>` (every added or changed file whole).
-`menora-model.json`, `HELP.md` and binary files are only in `files/`, never in the patch. Both
-sides are generated with today's templates, so the patch is the model's change only. Identical
+`menora-model.json`, `HELP.md` and binary files are only in `files/`, never in the patch. Without a
+kept snapshot both sides are generated with today's templates, so the patch is the model's change
+only (see Snapshots above). Identical
 models: all counts 0, "nothing to apply". A fullstack project with `flyway` gets the schema change as
 `backend/src/main/resources/db/migration/V<yyyyMMddHHmmss>__model_update.sql` — additions live,
 drops / NOT NULL / type changes commented out under "To review".

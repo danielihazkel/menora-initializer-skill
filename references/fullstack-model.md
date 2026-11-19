@@ -88,12 +88,13 @@ Project only: `seedData`, `openapi`, `inverseCollections`, `rtl`. (`secured` is 
 | `currency` | MONEY: `[A-Z]{3}`, default ILS |
 | `help` | ≤ 300 chars, shown under the input |
 | `showWhen` | boolean expression: shown (and required) only while it holds; the backend clears it otherwise |
+| `maxFiles` | FILE/IMAGE: the field holds several files, at most this many (1–50); not with `showWhen`, not in a unique key or a transition's `requires`. The DTO carries `[{id, name}]`; no list on an update keeps the files |
 | `formula` | computed column, set by the backend on every save; not on ENUM/UUID/FILE/IMAGE, not required, no default |
 
 Keys cannot be LOCAL_TIME, INSTANT, MONEY, MARKDOWN, FILE or IMAGE.
 
 **Expressions** (`rules`, `showWhen`, `formula`): `and or not && || !`, `== != < <= > >=`, `+ - * /`,
-numbers, `'text'`, `true/false`, field names, and `isEmpty(x) today() now() daysBetween(a,b)
+numbers, `'text'`, `true/false`, field names, a linked row's field one step through a MANY_TO_ONE (`costCenter.budget`: not long text, files or UUIDs), and `isEmpty(x) today() now() daysBetween(a,b)
 length(s) abs(n) round(n) date(…)`. ≤ 500 chars. `daysBetween(a, b)` is whole calendar days from a
 to b, end not counted (negative when b is earlier) — `daysBetween(startsOn, endsOn) + 1` counts
 both ends; there is no working-day or holiday function. An empty operand makes the result empty
@@ -113,7 +114,7 @@ both ends; there is no working-day or holiday function. An empty operand makes t
 |---|---|---|
 | `MANY_TO_ONE` | a foreign key column | `joinColumn`; not to a composite-key entity or a view |
 | `MANY_TO_MANY` | a set through a join table; multi-pick in the form | `joinTable`, `inverseJoinColumn`; never required, never to itself |
-| `ONE_TO_MANY` | the target's rows pointing here (read-only table in the details) | `mappedBy` = the child's many-to-one name (inferred when there is one); `composition: true` makes the child rows part of this form (child: writable, single generated key, required link back, no workflow/rules/files/lists of its own) |
+| `ONE_TO_MANY` | the target's rows pointing here (read-only table in the details) | `mappedBy` = the child's many-to-one name (inferred when there is one); `composition: true` makes the child rows part of this form (child: writable, single generated key, required link back, no workflow/files/lists of its own; rules, `showWhen` and `formula` are fine — the parent's save checks each row and answers `lines[i].field`) |
 
 `targetEntity` must be in the same request.
 

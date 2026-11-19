@@ -447,10 +447,21 @@ async function cmdUpdate(positional, flags) {
     await checkRequest(target, kindOf(target), flags);
 
     const body = fullstack
-      ? { base: model.request, target, ...(model.templatesHash ? { baseTemplatesHash: model.templatesHash } : {}) }
+      ? {
+        base: model.request, target,
+        ...(model.templatesHash ? { baseTemplatesHash: model.templatesHash } : {}),
+        // The files the server kept from the project's download: the update starts from them.
+        ...(typeof doc.generator?.snapshot === 'string' ? { baseSnapshot: doc.generator.snapshot } : {}),
+        // Which version of the generator's own tables the project's database has.
+        ...(Number.isInteger(doc.generator?.schemaVersion) ? { baseSchemaVersion: doc.generator.schemaVersion } : {}),
+      }
+      // A backend model file is sent whole: the server reads its generator.snapshot itself.
       : { base: doc.format ? doc : model.request, target };
     const { buf, headers } = await getBytes('POST', path, { json: body });
     counts = { added: +headers.get('x-update-added') || 0, changed: +headers.get('x-update-changed') || 0, deleted: +headers.get('x-update-deleted') || 0 };
+    // snapshot: compared with the files the project was generated with (generator fixes included);
+    // regenerated: with the old model generated again now (no snapshot kept for this project).
+    counts.base = headers.get('x-update-base') || 'regenerated';
 
     updateDir = resolve(typeof flags.out === 'string' ? flags.out : join(tmpdir(), `menora-update-${target.artifactId || 'project'}-${Date.now()}`));
     if (!(await isEmptyDir(updateDir)) && !flags.force) throw new CliError(`${updateDir} is not empty (--force to write over it)`);
