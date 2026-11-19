@@ -101,6 +101,11 @@ never touches.
    beside `h2` PostgreSQL would only be a second datasource).
 4. `mi preview --file req.json` until the server accepts it; `--show application.yaml` to confirm
    the datasource. Then generate and build both halves.
+5. The model's tables without a project: `mi tables ddl --file req.json --dialect ORACLE --out
+   schema.sql` (the project's `V1__init.sql`, for any database). To create them on a database, only
+   through an admin source with `createTables` (`mi live options`): `mi tables create --file req.json
+   --source sandbox --schema APP --check` first, show the user the SQL, then the same without
+   `--check` once they agree — it writes to their database.
 5. Tell the user what the model cannot say (access is per role, not per row — "only my own"
    needs code), and what needs setting up (workflow e-mails are off until mail is configured).
 

@@ -116,7 +116,7 @@ Live schema (a schema source an admin set up, or a typed connection while the se
 
 | Call | Body → answer |
 |---|---|
-| `GET /metadata/live-schema/options` | `{sources:[{name, dialect, defaultSchema}], typedConnections, drivers, defaultPorts, maxTables}` |
+| `GET /metadata/live-schema/options` | `{sources:[{name, dialect, defaultSchema, createTables}], typedConnections, drivers, defaultPorts, maxTables}` |
 | `POST /metadata/live-schema/schemas` | `{connection}` → `{schemas, defaultSchema}` |
 | `POST /metadata/live-schema/tables` | `{connection, schema}` → `{tables:[{name, kind: TABLE\|VIEW}], truncated}` |
 | `POST /metadata/live-schema/ddl` | `{connection, schema, tables, qualify?}` → `{dialect, sql, tables, views, warnings}` — the script to give the SQL wizard |
@@ -126,6 +126,21 @@ Live schema (a schema source an admin set up, or a typed connection while the se
 database, library (DB2), user, password, trustServerCertificate}`. The password is used for that
 call only. Refusals: 403 Not allowed / Host not allowed, 404 Unknown source, 400 Could not connect,
 429 Busy. At most 300 tables in one read.
+
+## A fullstack model's tables (`mi tables`)
+
+| Call | Body → answer |
+|---|---|
+| `POST /starter-fullstack.ddl[?dialect=D]` | the fullstack request → `{dialect, label, sql, tables, projectDialect, flyway}` — `sql` is byte for byte the `V1__init.sql` a project with `flyway` gets. `D` is `H2\|POSTGRESQL\|ORACLE\|MSSQL\|DB2` (or a dependency id); default: the model's own database. Flyway is not needed. |
+| `POST /starter-fullstack.create-tables` | `{request, source, schema, check?}` → `{dialect, label, schema, sql, tables, statements, created, checked, transactional, projectDialect, flyway}` |
+
+Create-tables writes only through an **admin source with `createTables`** (Admin → Schema sources →
+*Allow creating tables*) — never a typed connection. The SQL is written for the source's database
+(warn when it differs from `projectDialect`), every unqualified table is put in `schema`. `check: true`
+runs nothing and returns the SQL — do that first and show it. Refusals: **409 Tables exist** with
+`existing: ["SCHEMA.table", …]` (nothing run when any is there), 403 the source does not allow it,
+404 unknown source, 400 a model the generator refuses (path under `request.`) or a failed statement —
+PostgreSQL/SQL Server roll back; Oracle/DB2/H2 drop the tables that run made, and the message says so.
 
 ## Shared with the team (everyone sees and can change these)
 

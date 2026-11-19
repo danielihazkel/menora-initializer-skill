@@ -17,7 +17,7 @@ import {
   requestFromExample,
 } from './lib/models.mjs';
 
-const BOOLEAN_FLAGS = new Set(['json', 'force', 'apply', 'no-check', 'list', 'no-qualify', 'entities-only', 'help', 'pages', 'raw']);
+const BOOLEAN_FLAGS = new Set(['json', 'force', 'apply', 'no-check', 'list', 'no-qualify', 'entities-only', 'help', 'pages', 'raw', 'check']);
 
 function parseArgs(argv) {
   const flags = {};
@@ -393,6 +393,34 @@ async function cmdLive(positional, flags) {
   await emit(what === 'import' && flags['entities-only'] ? res.entities : res, flags);
 }
 
+// ── a fullstack model's tables: its DDL, or created on a schema source ──────────────────────────
+
+async function cmdTables(positional, flags) {
+  const what = positional[0];
+  if (!['ddl', 'create'].includes(what)) {
+    throw new CliError('mi tables ddl [--file model.json] [--dialect POSTGRESQL] [--out f.sql]\n'
+      + 'mi tables create --source NAME --schema S [--file model.json] [--check]');
+  }
+  const req = await requestFrom(flags);
+  if (!Array.isArray(req.entities)) throw new CliError('A fullstack model is needed (--file with entities)', EXIT.usage);
+  if (what === 'ddl') {
+    const query = typeof flags.dialect === 'string' ? `?dialect=${encodeURIComponent(flags.dialect)}` : '';
+    const res = await sendJson('POST', `/starter-fullstack.ddl${query}`, req);
+    if (typeof flags.out === 'string') {
+      await writeFile(flags.out, res.sql);
+      return out({ savedTo: resolve(flags.out), dialect: res.dialect, tables: res.tables, projectDialect: res.projectDialect });
+    }
+    if (flags.json) return out(res);
+    process.stdout.write(res.sql);
+    return;
+  }
+  if (typeof flags.source !== 'string' || typeof flags.schema !== 'string') {
+    throw new CliError('mi tables create needs --source NAME (mi live options: the sources with createTables) and --schema S');
+  }
+  out(await sendJson('POST', '/starter-fullstack.create-tables',
+    { request: req, source: flags.source, schema: flags.schema, check: Boolean(flags.check) }));
+}
+
 // ── a project's model, and updating it ───────────────────────────────────────────────────────────
 
 async function readProjectModel(where) {
@@ -625,6 +653,8 @@ const HELP = `mi — the Menora Initializr from the command line (server: ${BASE
   detect paths|channels|services --file doc       what an OpenAPI / AsyncAPI / WSDL document holds
   import ddl|select --file x.sql [--dialect D] [--entities-only] [--out f]   SQL → fullstack entities
   live options | schemas | tables | ddl | import  --source NAME | --conn conn.json  [--schema S] [--tables a,b] [--out f]
+  tables ddl [--file model] [flags] [--dialect D] [--out f.sql]     a fullstack model's CREATE TABLE script (its V1__init.sql)
+  tables create --source NAME --schema S [--file model] [--check]   create them on a schema source that allows it
   model <project-dir> [--out request.json]        the request a project was generated from
   update <project-dir> [--target req.json] [flags] [--out dir]      fetch an update and say what it holds
   update <project-dir> --use <update-dir> --apply                   apply the update fetched (and reviewed) before
@@ -646,6 +676,7 @@ const COMMANDS = {
   detect: cmdDetect,
   import: cmdImport,
   live: cmdLive,
+  tables: cmdTables,
   model: cmdModel,
   update: cmdUpdate,
   presets: (p, f) => cmdShared(p, f, 'presets'),
