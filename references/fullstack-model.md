@@ -61,9 +61,16 @@ Project only: `seedData`, `openapi`, `inverseCollections`, `rtl`. (`secured` is 
 - `viewQuery`: a SELECT → read-only `@Subselect` view (no relations, no generated key, no FILE/IMAGE).
 - `access`: `SIGNED_IN` < `USER` < `ADMIN`; default read USER, write ADMIN; write never more open
   than read. Anything but the default needs `ldap-auth`/`ldap-auth-rest` in the dependencies.
-  Access is per entity and role, **not per row**: "only my own requests" cannot be expressed —
-  say so to the user (a team adds it in the generated service). Everyone with write may edit any
-  row; a workflow's transitions narrow *moves* by role, not edits.
+  **Per row** (Round 14): `"access": {"read": "USER", "write": "USER", "owners": ["createdBy",
+  "assignee"], "rows": "OWN"}` — `owners` (1–4) say whose a row is: `createdBy` (whoever created
+  it; turns the entity's `audit` on) and/or STRING fields holding a user id. `rows`: `OWN`
+  (default — a user sees and changes only their own rows; anyone else gets 404) or `OWN_WRITES`
+  (everyone sees every row, only its owners change it; 403). Admins are never limited. Not on a
+  view, not on a composed child (it follows its parent), not with `read: ADMIN`; a workflow's
+  assignee cannot be the only owner. A row a user creates is theirs: an empty owner field is
+  filled with them, one naming somebody else is a 403. No ownership by LDAP group or by team.
+  Without `owners`, everyone with write may edit any row; a workflow's transitions narrow *moves*
+  by role, not edits.
 - `uniqueKeys`: 2+ members, fields or many-to-one names; a 409 names them on a clash.
 - `rules`: expressions over the entity's own fields (below); an empty value makes a rule hold.
 
@@ -95,7 +102,10 @@ Keys cannot be LOCAL_TIME, INSTANT, MONEY, MARKDOWN, FILE or IMAGE.
 
 **Expressions** (`rules`, `showWhen`, `formula`): `and or not && || !`, `== != < <= > >=`, `+ - * /`,
 numbers, `'text'`, `true/false`, field names, a linked row's field one step through a MANY_TO_ONE (`costCenter.budget`: not long text, files or UUIDs), and `isEmpty(x) today() now() daysBetween(a,b)
-length(s) abs(n) round(n) date(…)`. ≤ 500 chars. `daysBetween(a, b)` is whole calendar days from a
+length(s) abs(n) round(n) date(…)`. A parent reads the rows saved with it (a `composition` list) only
+through `sum(lines.total) min(…) max(…) avg(…)` over a number field of the rows and `count(lines)`:
+empty values are left out, no rows sum to 0 and have no min/max/avg, and a rule that reads only rows
+shows its message on the list (`field` may name it). ≤ 500 chars. `daysBetween(a, b)` is whole calendar days from a
 to b, end not counted (negative when b is earlier) — `daysBetween(startsOn, endsOn) + 1` counts
 both ends; there is no working-day or holiday function. An empty operand makes the result empty
 (and a rule over it hold).
@@ -113,8 +123,8 @@ both ends; there is no working-day or holiday function. An empty operand makes t
 | type | Means | Extra |
 |---|---|---|
 | `MANY_TO_ONE` | a foreign key column | `joinColumn`; not to a composite-key entity or a view |
-| `MANY_TO_MANY` | a set through a join table; multi-pick in the form | `joinTable`, `inverseJoinColumn`; never required, never to itself |
-| `ONE_TO_MANY` | the target's rows pointing here (read-only table in the details) | `mappedBy` = the child's many-to-one name (inferred when there is one); `composition: true` makes the child rows part of this form (child: writable, single generated key, required link back, no workflow/files/lists of its own; rules, `showWhen` and `formula` are fine — the parent's save checks each row and answers `lines[i].field`) |
+| `MANY_TO_MANY` | a set through a join table; multi-pick in the form, a bulk change (`PATCH …/bulk` with `value: [ids]`), a cell edited in place, a wizard step | `joinTable`, `inverseJoinColumn`; never required, never to itself. `mappedBy: "<set>"` makes it the **other side** of the target's own many-to-many to this entity (`Tag.posts` over `Post.tags`): same links, read, filtered and saved from here too — no join-table names on this side, one second side per set, and not when the target's rows belong to users (`access.owners`) |
+| `ONE_TO_MANY` | the target's rows pointing here (read-only table in the details) | `mappedBy` = the child's many-to-one name (inferred when there is one); `composition: true` makes the child rows part of this form (child: writable, single generated key, required link back, no workflow/files/lists of its own; rules, `showWhen` and `formula` are fine — the parent's save checks each row and answers `lines[i].field`). A parent with a composition gets `optimisticLocking` unless its own `opts` say `false`; its rules and formulas may read the rows (`sum(lines.total)`, `count(lines)`), and a row changed through its own endpoints re-runs them (a broken one is a 400 on that call) |
 
 `targetEntity` must be in the same request.
 

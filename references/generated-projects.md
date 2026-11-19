@@ -48,6 +48,9 @@ Root `pom.xml` (parent) + `<artifactId>-api` (the `@SpringBootApplication`, web 
 - **Access** (with `ldap-auth-rest`, the default): every call needs a `userinfo` header and the
   entity's read/write level; no header → 401, wrong role → 403. Locally: run the backend with the
   `local` profile; the frontend's dev server sends `userinfo: dev-user`.
+  With `access.owners` a user gets only their own rows (or sees all and changes their own);
+  `dev-user` is an ADMIN in the `local` profile and so sees everything — set
+  `app.security.dev-roles.dev-user: USER` there to see the limit at work.
 - **Backend**: `cd backend && mvn verify` (the `tests` option gives each entity an `<Entity>ApiTest`
   through the real controller and an in-memory H2 on the `test` profile — passes with no database
   running). `mvn test -Pdb-tests` runs them on the real PostgreSQL/Oracle/SQL Server in Docker.
