@@ -19,8 +19,10 @@ Fullstack request properties are in `fullstack-model.md`; the generated projects
   `{error: "Invalid request body"}`. An unknown dependency id surfaces as a **500**
   `"Unknown dependency 'x'"` on the JSON endpoints, and as a 400 with **no reason** on `/starter.zip`
   (`mi.mjs` checks ids against the catalog first, so neither is reached).
-- **Limits.** Pasted documents: 5 MB in one request (`menora.wizard.max-documents-size`). Team
-  presets/models: 1 MB snapshot, name ≤ 150, description ≤ 500, names unique ignoring case (409).
+- **Limits.** Pasted documents: 5 MB in one request (`menora.wizard.max-documents-size`). Any
+  request body: 32 MB (`menora.request.max-body-size`), past it **413** `{error: "Request too large",
+  detail}` before anything is read. Team presets/models: 1 MB snapshot, name ≤ 150, description ≤ 500,
+  names unique ignoring case (409).
 - **Versions.** Boot `3.2.1` (default) and `3.5.16`; Java `21` (default) and `17`; Maven + Java only
   (Gradle and Kotlin are refused). `/metadata/client` lists Boot as `3.2.1.RELEASE`: send `3.2.1`.
 - **Compatibility rules** hold on every backend endpoint: a dependency another one REQUIRES is added
@@ -132,7 +134,8 @@ expression index becomes a comment on the entity); `CREATE VIEW` and bare `SELEC
 (anything else is a `String` with a TODO). A view that selects `*` from a table the script does
 not create, or an unnamed expression, is a 400 unless it has a column list.
 
-Live schema (a schema source an admin set up, or a typed connection while the server allows it):
+Live schema (a schema source an admin set up — or a typed connection, only where the server was
+told to allow it: `typedConnections` in the options is `false` as shipped, and a typed one is then a 403):
 
 | Call | Body → answer |
 |---|---|
@@ -162,7 +165,7 @@ runs nothing and returns the SQL — do that first and show it. Refusals: **409 
 404 unknown source, 400 a model the generator refuses (path under `request.`) or a failed statement —
 PostgreSQL/SQL Server roll back; Oracle/DB2/H2 drop the tables that run made, and the message says so.
 
-## Shared with the team (everyone sees and can change these)
+## Shared with the team (everyone sees and saves these; the creator or an admin changes them)
 
 | Path | Body |
 |---|---|
@@ -170,7 +173,12 @@ PostgreSQL/SQL Server roll back; Oracle/DB2/H2 drop the tables that run made, an
 | `/metadata/fullstack/models` same verbs | `{name, description?, snapshot}` — the web Fullstack editor's model (`format: "menora-fullstack-model/1"`, `meta`, `entities`, `selectedDeps`, `scaffoldOpts`, `backendSet`, `frontendSet`, `pages`, `nav`) |
 | `/metadata/fullstack/templates?kind=page\|widget` same verbs | `{kind, name, description?, content}` — one page or widget definition for the layout designer |
 
-No ownership is enforced: a PUT or DELETE changes it for everyone.
+Every answer carries `createdBy`, `updatedBy` and `canEdit` (whether *this caller* may change it).
+A PUT or DELETE is allowed for the row's creator (the `userinfo` header — `MENORA_USERINFO` for
+`mi.mjs` — compared ignoring case), for a request with an admin token (`Authorization: Bearer …`),
+and for anyone when the row has no creator. Otherwise **403** `{error: "Not yours to change", detail:
+"Saved by alice — only they or a signed-in admin can change or delete it"}`: save under another
+name instead of overwriting somebody else's.
 
 ## React frontend — `GET /frontend/starter.zip` / `.preview`
 
