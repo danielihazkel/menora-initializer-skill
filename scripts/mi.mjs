@@ -8,7 +8,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile, copyFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { BASE_URL, CliError, EXIT, getBytes, getJson, sendJson } from './lib/http.mjs';
 import { readZip, commonRoot, extract } from './lib/zip.mjs';
@@ -65,7 +65,54 @@ function parseJson(text, what) {
 async function requestFrom(flags) {
   const text = await readInput(flags);
   const base = text === null ? {} : readModel(parseJson(text, flags.file)).request;
-  return applyFlags(await withSetDefaults(base, flags), flags);
+  return withWsdl(applyFlags(await withSetDefaults(base, flags), flags), flags);
+}
+
+/**
+ * --wsdl <main.wsdl> [--wsdl-files a.xsd,schemas/b.xsd | <folder>]: the SOAP wizard's WSDL read from
+ * disk and, for one that comes in several files, the WSDLs and schemas it refers to — each named by
+ * its path from the main document's folder, which is how the references in it find them. A folder
+ * stands for every .wsdl, .xsd and .xml under it. Null without --wsdl.
+ */
+async function wsdlFrom(flags) {
+  if (typeof flags.wsdl !== 'string') {
+    if (flags['wsdl-files'] !== undefined) throw new CliError('--wsdl-files goes with --wsdl <main.wsdl>');
+    return null;
+  }
+  const main = resolve(flags.wsdl);
+  if (!existsSync(main) || statSync(main).isDirectory()) throw new CliError(`No such file: ${flags.wsdl}`);
+  const paths = [];
+  for (const given of typeof flags['wsdl-files'] === 'string' ? list(flags['wsdl-files']) : []) {
+    const path = resolve(given);
+    if (!existsSync(path)) throw new CliError(`No such file: ${given}`);
+    if (!statSync(path).isDirectory()) paths.push(path);
+    else paths.push(...(await walk(path)).filter((f) => /\.(wsdl|xsd|xml)$/i.test(f)).map((f) => join(path, f)));
+  }
+  const files = {};
+  for (const path of paths) {
+    if (path === main) continue;
+    const name = relative(dirname(main), path).split(sep).join('/');
+    if (name.startsWith('..') || isAbsolute(name)) {
+      throw new CliError(`${path} is outside the folder of ${flags.wsdl}: a WSDL's files are named from the main document's folder`);
+    }
+    files[name] = await readFile(path, 'utf8');
+  }
+  return { wsdl: await readFile(main, 'utf8'), files };
+}
+
+/** The request with --wsdl / --wsdl-files in it, under --wsdl-dep (web-services). */
+async function withWsdl(req, flags) {
+  const soap = await wsdlFrom(flags);
+  if (!soap) return req;
+  const dep = typeof flags['wsdl-dep'] === 'string' ? flags['wsdl-dep'] : 'web-services';
+  const filesByDep = { ...req.wsdlFilesByDep };
+  if (Object.keys(soap.files).length > 0) filesByDep[dep] = soap.files;
+  else delete filesByDep[dep];
+  const next = { ...req, wsdlByDep: { ...req.wsdlByDep, [dep]: soap.wsdl } };
+  if (Object.keys(filesByDep).length > 0) next.wsdlFilesByDep = filesByDep;
+  else delete next.wsdlFilesByDep;
+  if (!Array.isArray(next.dependencies) || !next.dependencies.includes(dep)) next.dependencies = [...(next.dependencies || []), dep];
+  return next;
 }
 
 /**
@@ -353,6 +400,12 @@ async function cmdDetect(positional, flags) {
   const what = positional[0];
   const map = { paths: ['/starter-wizard.detect-paths', 'spec'], channels: ['/starter-wizard.detect-channels', 'spec'], services: ['/starter-wizard.detect-services', 'wsdl'] };
   if (!map[what]) throw new CliError('mi detect paths|channels|services --file <document>');
+  // A WSDL in several files: the main document and what it refers to.
+  if (what === 'services' && flags['wsdl-files'] !== undefined) {
+    const soap = await wsdlFrom({ ...flags, wsdl: typeof flags.wsdl === 'string' ? flags.wsdl : flags.file });
+    if (!soap) throw new CliError('mi detect services --file <main.wsdl> --wsdl-files <a.xsd,b.wsdl | folder>');
+    return out(await sendJson('POST', map[what][0], { wsdl: soap.wsdl, files: soap.files }));
+  }
   const doc = await readInput(flags, 'file', { required: true });
   out(await sendJson('POST', map[what][0], { [map[what][1]]: doc }));
 }
@@ -650,7 +703,10 @@ const HELP = `mi — the Menora Initializr from the command line (server: ${BASE
                   --department --deps a,b --add-deps a,b --db postgresql (one database in place of h2) --opts "dep=o1,o2;dep2=o3"
                   --scaffold a,b (replaces the list) --add-scaffold a,b --modules a,b
                   --no-check (skip the dependency/version check made before calling)
+                  --wsdl main.wsdl [--wsdl-files a.xsd,schemas/b.xsd | folder] (the SOAP wizard's WSDL from disk,
+                    with the files it imports; --wsdl-dep web-services)
   detect paths|channels|services --file doc       what an OpenAPI / AsyncAPI / WSDL document holds
+                                                  (services: --wsdl-files a.xsd,b.wsdl | folder for a WSDL in several files)
   import ddl|select --file x.sql [--dialect D] [--entities-only] [--out f]   SQL → fullstack entities
   live options | schemas | tables | ddl | import  --source NAME | --conn conn.json  [--schema S] [--tables a,b] [--out f]
   tables ddl [--file model] [flags] [--dialect D] [--out f.sql]     a fullstack model's CREATE TABLE script (its V1__init.sql)

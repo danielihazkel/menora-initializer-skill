@@ -170,6 +170,26 @@ describe('wizards', () => {
     assert.ok(miJson(['preview', '--file', events]).files.some((f) => /\/events\//.test(f)));
   });
 
+  test('a WSDL in several files, read from disk', () => {
+    const main = join(FIXTURES, 'split', 'greeting.wsdl');
+    // The folder stands for every file in it; the main document is not one of its own files.
+    assert.deepEqual(miJson(['detect', 'services', '--file', main, '--wsdl-files', join(FIXTURES, 'split')]),
+      ['GreetingService.GreetingPort: Greet']);
+    const files = miJson(['preview', 'wizard', '--artifact', 'greeter', '--wsdl', main,
+      '--wsdl-files', join(FIXTURES, 'split', 'schemas', 'greeting.xsd')]).files;
+    assert.ok(files.includes('src/main/resources/wsdl/greeting-service.wsdl'));
+    assert.ok(files.includes('src/main/resources/wsdl/schemas/greeting.xsd'));
+    assert.ok(files.some((f) => /endpoint\/GreetingServiceEndpoint\.java$/.test(f)));
+    // Without its schema the WSDL is refused, naming what is missing.
+    const missing = miError(['preview', 'wizard', '--artifact', 'greeter', '--wsdl', main]);
+    assert.equal(missing.body.error, 'Invalid WSDL');
+    assert.match(missing.body.messages[0], /schemas\/greeting\.xsd/);
+    // A file from outside the main document's folder has no name to go by.
+    const outside = mi(['preview', 'wizard', '--wsdl', main, '--wsdl-files', join(FIXTURES, 'service.wsdl')]);
+    assert.equal(outside.code, 2);
+    assert.match(outside.stderr, /outside the folder/);
+  });
+
   test('detect and a broken document', () => {
     assert.deepEqual(miJson(['detect', 'paths', '--file', join(FIXTURES, 'openapi.yaml')]), ['GET /users', 'GET /users/{id}']);
     assert.ok(miJson(['detect', 'channels', '--file', join(FIXTURES, 'asyncapi.yaml')]).some((c) => c.name === 'orderCreated'));

@@ -67,16 +67,28 @@ Zip root: `<artifactId>/`. **A wizard request is one module** — `modules` is n
 |---|---|---|
 | SQL → JPA | `sqlByDep: {"postgresql": "CREATE TABLE …"}` (key: a database dependency) | `sqlOptions`: `subPackage` ("entity"), `tables: [{name, generateRepository}]` (unlisted = all, with repositories), `apiMode`: `NONE` \| `ENTITY_DIRECT` \| `INLINE_DTO` \| `MAPSTRUCT_DTO` (REST controllers over the entities), `flywayBaseline` (default true: the script becomes `V1__init.sql` when `flyway` is selected), `generateTests` (needs an apiMode) |
 | OpenAPI | `specByDep: {"web": "openapi: 3.0.0 …"}` | `openApiOptions`: `mode` `CONTROLLERS` \| `CLIENT` \| `BOTH`, `apiStyle` `interfaces` (an `XxxApi` interface regenerated freely + an `XxxController implements` the team owns — **use this for anything that will be updated**) \| `classes`, `clientKind` `restTemplate` \| `restClient`, `copySpec` (keep the spec in `src/main/resources/openapi/`), `apiSubPackage` ("api"), `dtoSubPackage` ("dto"), `clientSubPackage` ("client"), `baseUrlProperty`. A generated client reads its credentials from `<base>.security.<scheme>.api-key \| token \| username \| password`; an OAuth2 client-credentials scheme also takes `client-id`, `client-secret` (then the client fetches and renews its own token), `scopes`, `token-url`, `client-authentication` (`basic` \| `post`) |
-| SOAP | `wsdlByDep: {"web-services": "<definitions …>"}` (self-contained; imports are refused) | `soapOptions`: `mode` `ENDPOINTS` \| `CLIENT` \| `BOTH`, `contextPath` ("/ws"), `endpointSubPackage`, `clientSubPackage`, `payloadSubPackage`, `baseUrlProperty` |
+| SOAP | `wsdlByDep: {"web-services": "<definitions …>"}` — the main document. One that imports other files also sends `wsdlFilesByDep: {"web-services": {"schemas/types.xsd": "<xsd:schema …>", "port/port.wsdl": "…"}}`: each imported WSDL / schema under its path relative to the main document, as the reference to it reads (`mi … --wsdl main.wsdl --wsdl-files a.xsd,b.wsdl` or a folder builds both from disk) | `soapOptions`: `mode` `ENDPOINTS` \| `CLIENT` \| `BOTH`, `contextPath` ("/ws"), `endpointSubPackage`, `clientSubPackage`, `payloadSubPackage`, `baseUrlProperty` |
 | Events (AsyncAPI 2.x/3.x → Kafka) | `asyncApiByDep: {"kafka": "asyncapi: 3.0.0 …"}` | `eventOptions`: `channels: [{name, produce, consume}]` (absent = as the document's application does), `groupId`, `subPackage` ("events"), `payloadSubPackage` ("events.model"), `generateTests`, `schemaRegistry` (`confluent`: Avro through Confluent's schema registry; absent: the single-object encoding). Avro channels (`schemaFormat: application/vnd.apache.avro…`) become `.avsc` + avro-maven-plugin. A message's headers (traits merged), `correlationId` header and `bindings.kafka.key` (a UUID) are read: a `<Message>Headers` record, `send(key, payload, headers)`, `handle(key, payload, headers)` |
 
 The server adds what a wizard needs (`data-jpa` for SQL, `web` for an API, `openapi`, `mapstruct`,
 `kafka`, `web-services`). External `$ref`s / imports in a pasted document are refused.
 
+**A WSDL in several files.** The server reads only what it is sent: a `wsdl:import` or
+`xsd:import` / `include` / `redefine` is followed, from the folder of the file that makes it, to
+one of the `wsdlFilesByDep` files. A reference to an address (`http://…`, `file:…`, an absolute
+path), out of the main document's folder, or to a file not sent is a 400 `Invalid WSDL` whose
+message names the referring file. File names: letters, digits, `-`, `_`, `.`, `/` between folders,
+ending `.wsdl` / `.xsd` / `.xml`; at most 100; counted in the 5 MB. The files land in
+`src/main/resources/wsdl/<path>` beside the main document (`<service-name>.wsdl`); with endpoints
+each `.wsdl` / `.xsd` is also served by its file name (`/ws/schemas/types.xsd`), so two files of
+one name are refused in `ENDPOINTS` / `BOTH`. `menora-model.json` keeps the files, so an update
+carries them.
+
 Detect what a document holds before choosing options:
 `POST /starter-wizard.detect-paths` `{spec}` → `["GET /pets", …]`;
 `POST /starter-wizard.detect-channels` `{spec}` → `[{name, address, sends, receives, messages, problem, format: json|avro}]`;
-`POST /starter-wizard.detect-services` `{wsdl}` → `["Service.Port: op1, op2"]`.
+`POST /starter-wizard.detect-services` `{wsdl, files?}` → `["Service.Port: op1, op2"]` (`files`: the
+same map as one dependency's `wsdlFilesByDep`; `mi detect services --file main.wsdl --wsdl-files …`).
 
 ## Updating a project
 
@@ -110,7 +122,15 @@ drops / NOT NULL / type changes commented out under "To review".
 ## SQL → entities, and live databases
 
 `POST /metadata/fullstack/import-ddl` and `/import-select` `{sql, dialect?}` → `{entities, note}`
-(entities in the fullstack wire shape; `import-select` makes read-only view entities).
+(entities in the fullstack wire shape; `import-select` makes read-only view entities, and so does
+a `CREATE VIEW` in an `import-ddl` script — typed by the tables it reads, its first column the key).
+
+What the SQL wizard (`sqlByDep`) reads from a script: `CREATE TABLE`; `ALTER TABLE … ADD` keys and
+constraints; `CHECK (col IN …)` as an enum; `CREATE INDEX` as `@Table(indexes = …)` (a partial or
+expression index becomes a comment on the entity); `CREATE VIEW` and bare `SELECT` as read-only
+`@Subselect` entities whose fields take the type of the table column they select or of a `CAST`
+(anything else is a `String` with a TODO). A view that selects `*` from a table the script does
+not create, or an unnamed expression, is a 400 unless it has a column list.
 
 Live schema (a schema source an admin set up, or a typed connection while the server allows it):
 
@@ -119,7 +139,7 @@ Live schema (a schema source an admin set up, or a typed connection while the se
 | `GET /metadata/live-schema/options` | `{sources:[{name, dialect, defaultSchema, createTables}], typedConnections, drivers, defaultPorts, maxTables}` |
 | `POST /metadata/live-schema/schemas` | `{connection}` → `{schemas, defaultSchema}` |
 | `POST /metadata/live-schema/tables` | `{connection, schema}` → `{tables:[{name, kind: TABLE\|VIEW}], truncated}` |
-| `POST /metadata/live-schema/ddl` | `{connection, schema, tables, qualify?}` → `{dialect, sql, tables, views, warnings}` — the script to give the SQL wizard |
+| `POST /metadata/live-schema/ddl` | `{connection, schema, tables, qualify?}` → `{dialect, sql, tables, views, warnings}` — the script to give the SQL wizard: tables with defaults, foreign keys, `CREATE INDEX`, `COMMENT ON`, and a `SELECT` per view that casts each column to its type |
 | `POST /metadata/fullstack/import-live` | same body → `{entities, note}` |
 
 `connection` is `{source: "<name>"}` or `{dialect: POSTGRESQL|MSSQL|ORACLE|DB2, host, port,

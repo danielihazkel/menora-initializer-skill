@@ -27,7 +27,7 @@ One script does everything: `scripts/mi.mjs` next to this file (Node ≥ 18, no 
 | several Maven modules (api/core/persistence) | `multimodule` | `--modules api,core,persistence` |
 | JPA entities from DDL or from a live database | `wizard` (SQL) | `sqlByDep` — `mi live ddl` writes the script |
 | controllers and/or a client from an OpenAPI spec | `wizard` (OpenAPI) | `specByDep`, `apiStyle: "interfaces"` |
-| SOAP endpoints/client from a WSDL | `wizard` (SOAP) | `wsdlByDep` |
+| SOAP endpoints/client from a WSDL | `wizard` (SOAP) | `wsdlByDep`; from disk: `--wsdl main.wsdl`, plus `--wsdl-files a.xsd,b.wsdl` (or a folder) when it imports other files |
 | Kafka producers/listeners from AsyncAPI | `wizard` (events) | `asyncApiByDep` on `kafka` |
 | a working CRUD app, backend + frontend | `fullstack` | `mi example <id>`, `mi import ddl`, or `mi live import` |
 | a React app only | `frontend` | `mi generate frontend --projectName x --deps router` |
